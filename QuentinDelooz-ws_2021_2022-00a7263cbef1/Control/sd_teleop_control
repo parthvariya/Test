@@ -1,0 +1,128 @@
+#! /usr/bin/env python3
+
+import rospy
+import numpy as np
+import pygame
+import roslib
+from geometry_msgs.msg import TwistStamped
+from aslan_msgs.msg import SDControl
+import sys, select, os
+import time
+
+global steer,torque,brake,direction
+
+# *********************************************************************************#
+#                         init &  check if the joystick is connected               #
+# *********************************************************************************#
+
+def joystick_connection():
+    pygame.init()
+    pygame.joystick.init()
+
+    # Get count of joysticks.
+    joystick_count = pygame.joystick.get_count()
+
+    if joystick_count == 0:
+        print("there is no connected joystick - connect and try again...")
+        sys.exit(1)
+
+joystick_connection()
+
+
+
+# *********************************************************************************#
+#                                Main Program                                      #
+# *********************************************************************************#
+
+
+# manage how fast the screen updates.
+clock = pygame.time.Clock()
+
+done = False
+
+
+def inputs():
+    pygame.init()
+    pygame.joystick.init()
+
+    torque = 0.0
+    brake = 0.0
+    steer = 0.0
+
+
+    # EVENT PROCESSING STEP
+    for event in pygame.event.get():    # User Clicks
+        if event.type == pygame.QUIT:   # If user clicked close.
+            done = True                 # Flag that we are done so we exit this loop.
+
+    # Get count of joysticks.
+    joystick_count = pygame.joystick.get_count()
+    # For each joystick:
+    for i in range(joystick_count):
+        joystick = pygame.joystick.Joystick(i)
+        joystick.init()
+
+        # Axis names
+        Axis_Name = ["Steer", "torque", "Brake"]
+
+        steer = joystick.get_axis(0)
+        clutch = joystick.get_axis(1)  # clutch named as acceleration
+        torque = joystick.get_axis(2)  # acceleration was given as brake
+        brake = joystick.get_axis(3)   # brake is given as  direction
+    
+    return steer,torque,brake
+
+
+
+def Publisher():
+    rospy.init_node('manualcontroljoy', anonymous=True)
+    pub = rospy.Publisher('/twist_cmd', TwistStamped, latch=True, queue_size=10)
+    control_msg = TwistStamped()
+    rate = rospy.Rate(100)
+
+    while not rospy.is_shutdown():
+
+        steer,torque,brake = inputs()
+
+# *********************************************************************************#
+#                            scale the Joystick values                             #
+# *********************************************************************************#
+
+        # torque value between 0 and 100 #
+        torque = 100-(int(((torque+1)/2)*(101)))  
+        
+        # steer value between -0.28 and 0.28 #
+        # Negative value assign to right steer and Positive value assign to left steer # 
+        steer= float(((steer)*0.28)*(-1))     
+        
+        # brake value between 0 and -100 #
+        brake = -(100+(int(((brake+1)/2)*(-101))))          
+        
+        
+        # saftey critical function #
+        if brake==0:
+            torque=torque
+        else:
+            torque=0
+
+
+        if(brake):
+             control_msg.twist.linear.x = brake
+        else:
+            control_msg.twist.linear.x = torque
+            control_msg.twist.angular.z = steer
+
+        
+        print("Throttle " , torque, " brake ", brake, " steer ", steer)
+        pub.publish(control_msg)
+        rate.sleep()
+
+
+if __name__ == '__main__':
+
+    try:
+        Publisher()
+    except rospy.ROSInterruptException:
+        pass
+
+    pygame.quit()
